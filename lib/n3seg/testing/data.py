@@ -20,8 +20,7 @@ def load_data(name,ext="png"):
     for t in range(MAX_FRAMES):
         fn_t = path / ("%05d.%s" % (t,ext))
         img = np.array(Image.open(fn_t))
-        img = th.from_numpy(img)
         img = rearrange(img,'h w c -> c h w')
         burst.append(img)
-    burst = th.stack(burst)
+    burst = np.stack(burst)
     return burst

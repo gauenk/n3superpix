@@ -15,9 +15,9 @@ def run_slic(burst,ncomps=1600,comp=10):
 
         # -- prepare --
         frame_t = burst[t]
-        frame_t = rearrange(frame_t,'c h w -> h w c').contiguous()
+        frame_t = rearrange(frame_t,'c h w -> h w c')
         frame_t = frame_t.cpu().numpy() if th.is_tensor(frame_t) else frame_t
-        frame_t = frame_t.astype(np.uint8)
+        frame_t = np.ascontiguousarray(frame_t.astype(np.uint8))
 
         # -- exec --
         slic_t = Slic(num_components=ncomps, compactness=comp)
@@ -28,20 +28,6 @@ def run_slic(burst,ncomps=1600,comp=10):
         labels.append(labels_t)
 
     # -- formatting --
-    labels = th.from_numpy(np.stack(labels))
+    # labels = th.from_numpy(np.stack(labels))
 
     return slics,labels
-
-def superpix_nn(src,tgt):
-    """
-    Compute nearest neighbors between two frame
-    using the superpixels
-    """
-    pass
-
-
-def superpix_warp(src,tgt,neighs):
-    """
-    Warp the src image into the tgt image
-    """
-    return src.img/255.

@@ -14,6 +14,7 @@ def main():
 
     # -- load image burst --
     burst = n3seg.testing.load_data("motorbike")[:3]
+    burst = burst[:,:32,:32]
 
     # -- superpixels --
     slics,labels = n3seg.run_slic(burst)
@@ -27,15 +28,15 @@ def main():
     tgt = n3seg.utils.superpix_dict(burst,labels,slics,1)
 
     # -- compute nearest neighbors --
-    neighs = n3seg.superpix_nn(src,tgt)
-    warped = n3seg.superpix_warp(src,tgt,neighs)
+    neighs = n3seg.run_superpix_nn(src,tgt)
+    warped = n3seg.run_superpix_warp(src,tgt,neighs)
 
     # -- [optional] viz warped frame --
     if viz:
         n3seg.utils.save_image(warped,"./output/warped.png")
 
     # -- compute sim quality --
-    delta = th.mean((warped - burst[0])**2).item()
+    delta = np.mean((warped - burst[0])**2).item()
     print("[Sim Image (SSD)]: ",delta)
 
 

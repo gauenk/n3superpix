@@ -1,3 +1,5 @@
-from .impl import run_slic,superpix_nn,superpix_warp
+from .slic import run_slic
+from .superpix_nn import run_superpix_nn
+from .superpix_warp import run_superpix_warp
 from . import utils
 from . import testing
