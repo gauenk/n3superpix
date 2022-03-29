@@ -49,7 +49,7 @@ def get_superpix_box_nn(src,tgt,neighs,viz_list=None):
         src_box = get_superpix_box(src.img,src.labels,viz_label)
         boxes = get_superpix_list(tgt.img,tgt.labels,label_nn)
         boxes = update_boxes(boxes,src_box)
-        boxes = [boxes[-1]] + [x for x in boxes]
+        boxes = [boxes[-1]] + [x for x in boxes[:-1]]
 
         # -- create grid --
         boxes = np.stack(boxes)

@@ -27,6 +27,8 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     flow = zflow
 
     # -- relevant superpix shapes  --
+    delta = np.mean(((src.labels - tgt.labels)**2).astype(np.float))
+    print("delta: ",delta)
     superpix_shapes(tgt)
     superpix_shapes(src)
 
@@ -67,10 +69,7 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     labelSearchWindow = create_search_window(src.labels2pix,tgt.pix2windowLabels)
 
     # -- compute topk values --
-    print("src.labels2pix.shape: ",src.labels2pix.shape)
-    print("tgt.labels2pix.shape: ",tgt.labels2pix.shape)
     norms = float("inf") * np.ones((src.nlabels,tgt.nlabels),dtype=np.float32)
-    print("norms.shape: ",norms.shape)
     superpixel_norm_labels_numba(norms,labelSearchWindow,
                                  src.img,src.labels,src.pix2windowLabels,
                                  src.labels2pix,src.labels2pix_ave,src.weights,
@@ -92,9 +91,12 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     order = np.argsort(topk.vals,1)
     topk.vals = np.take_along_axis(topk.vals,order,1)
     topk.inds = np.take_along_axis(topk.inds,order,1)
-    print(topk.vals[[0,10,42,50,80]])
-    print(topk.inds[[0,10,42,50,80]])
-    # exit(0)
+    print(topk.vals[[0,10,30,50,80,10]])
+    print(topk.inds[[0,10,30,50,80,10]])
+    print("-"*30)
+    print(topk.vals[[127,37,149,19,104,179]])
+    print(topk.inds[[127,37,149,19,104,179]])
+
 
     return topk
 
@@ -274,7 +276,7 @@ def superpixel_norm_labels_numba(norms,labelSearchWindow,
                     tgt_ave_w = tgt_labels2pix_ave[tgt_label,1]
                     joint_d = ((src_h - src_ave_h) - (tgt_h - tgt_ave_h) )**2
                     joint_d += ((src_w - src_ave_w) - (tgt_w - tgt_ave_w))**2
-                    joint_w = np.exp(-joint_d/(20.))
+                    joint_w = np.exp(-joint_d/(2.*1e-2))
 
                     # -- compte deltas --
                     pk_dist = 0
