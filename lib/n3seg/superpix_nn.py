@@ -48,20 +48,34 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     # -- L2 Norm between super-pixels? --
     norm_sp = float("inf") * np.ones((h,w,smax),dtype=np.float32)
     weight_sp = float("inf") * np.ones((h,w,smax),dtype=np.float32)
-    superpixel_norm_numba(norm_sp,weight_sp,flow,
-                          src.img,src.labels,src.pix2windowLabels,#src.labe2pix,
-                          src.labels2pix_ave,src.weights,
-                          tgt.img,tgt.pix2windowLabels,tgt.labels2pix,
-                          tgt.labels2pix_ave,tgt.weights)
+    # superpixel_norm_numba(norm_sp,weight_sp,flow,
+    #                       src.img,src.labels,src.pix2windowLabels,#src.labe2pix,
+    #                       src.labels2pix_ave,src.weights,
+    #                       tgt.img,tgt.pix2windowLabels,tgt.labels2pix,
+    #                       tgt.labels2pix_ave,tgt.weights)
 
-    norms = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
-    norms_w = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
-    counts = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
+    # norms = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
+    # norms_w = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
+    # counts = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
 
-    superpixel_reduce_numba(norms,norms_w,counts,norm_sp,weight_sp,
-                            src.labels2pix,tgt.pix2windowLabels)
-    norms[np.where(counts == 0)] = float("inf")
-    norms = norms/norms_w
+    # superpixel_reduce_numba(norms,norms_w,counts,norm_sp,weight_sp,
+    #                         src.labels2pix,tgt.pix2windowLabels)
+    # norms[np.where(counts == 0)] = float("inf")
+    # norms = norms/norms_w
+
+    # -- from (h,w,list of tgt labels) -> (source label,list of tgt labels)
+    labelSearchWindow = create_search_window(src.labels2pix,tgt.pix2windowLabels)
+
+    # -- compute topk values --
+    print("src.labels2pix.shape: ",src.labels2pix.shape)
+    print("tgt.labels2pix.shape: ",tgt.labels2pix.shape)
+    norms = float("inf") * np.ones((src.nlabels,tgt.nlabels),dtype=np.float32)
+    print("norms.shape: ",norms.shape)
+    superpixel_norm_labels_numba(norms,labelSearchWindow,
+                                 src.img,src.labels,src.pix2windowLabels,
+                                 src.labels2pix,src.labels2pix_ave,src.weights,
+                                 tgt.img,tgt.pix2windowLabels,tgt.labels2pix,
+                                 tgt.labels2pix_ave,tgt.weights)
 
     #
     # -- take topk norms --
@@ -80,6 +94,7 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     topk.inds = np.take_along_axis(topk.inds,order,1)
     print(topk.vals[[0,10,42,50,80]])
     print(topk.inds[[0,10,42,50,80]])
+    # exit(0)
 
     return topk
 
@@ -121,6 +136,26 @@ def superpixel_reduce_numba(norm_labels,norm_weights,counts,norm_sp,weight_sp,
                 norm_labels[src_label,tgt_label] += sp
                 norm_weights[src_label,tgt_label] += w
                 counts[src_label,tgt_label] += 1
+
+def create_search_window(src_labels2pix,tgt_pix2windowLabels):
+    src_nlabels = src_labels2pix.shape[0]
+    h,w,nsearch = tgt_pix2windowLabels.shape[:3]
+    searchLabelWindow = np.zeros((src_nlabels,nsearch),dtype=np.int16)
+    create_search_window_numba(searchLabelWindow,src_labels2pix,tgt_pix2windowLabels)
+    return searchLabelWindow
+
+@jit
+def create_search_window_numba(searchLabelWindow,src_labels2pix,tgt_pix2windowLabels):
+    src_nlabels,npix = src_labels2pix.shape[:2]
+    h,w,nsearch = tgt_pix2windowLabels.shape
+    for src_label in prange(src_nlabels):
+        search_index = 0
+        for pix_index in range(npix):
+            tgt_h = src_labels2pix[src_label,pix_index,0]
+            tgt_w = src_labels2pix[src_label,pix_index,1]
+            if tgt_h == -1: break
+            tgt_label = tgt_pix2windowLabels[tgt_h,tgt_w,pix_index]
+            searchLabelWindow[src_label,pix_index] = tgt_label
 
 def compute_search_labels(spix,flow,smax,ws):
     # -- Which labels are neighbors of my pixel? create pixel 2 window-labels --
@@ -195,6 +230,69 @@ def labels2pix_numba(labels2pix,counts,labels):
             counts[label] += 1
 
 @jit
+def superpixel_norm_labels_numba(norms,labelSearchWindow,
+                                 src_img,src_labels,src_pix2windowLabels,
+                                 src_labels2pix,src_labels2pix_ave,src_weights,
+                                 tgt_img,tgt_pix2windowLabels,tgt_labels2pix,
+                                 tgt_labels2pix_ave,tgt_weights):
+
+    # -- unpack --
+    src_nlabels,tgt_nlabels = norms.shape
+    c,h,w = src_img.shape
+    tgt_nlabels,tgt_npix = tgt_labels2pix.shape[:2]
+    src_nlabels,src_npix = src_labels2pix.shape[:2]
+    nchnls = c
+    src_nlabels,nsearch = labelSearchWindow.shape
+
+    # -- compute each coordinate in parallel --
+    for src_label in prange(src_nlabels):
+        for search_index in prange(nsearch):
+            tgt_label = labelSearchWindow[src_label,search_index]
+
+            # -- init srch value --
+            dist = 0
+            Z = 0
+
+            # -- source pixels --
+            for src_pix in range(src_npix):
+                src_h = src_labels2pix[src_label,src_pix,0]
+                src_w = src_labels2pix[src_label,src_pix,1]
+                if src_h == -1 or src_w == -1: break
+                src_weight = src_weights[src_h,src_w]
+
+                # -- target pixels --
+                for tgt_pix in range(tgt_npix):
+                    tgt_h = tgt_labels2pix[tgt_label,tgt_pix,0]
+                    tgt_w = tgt_labels2pix[tgt_label,tgt_pix,1]
+                    if tgt_h == -1 or tgt_w == -1: break
+                    tgt_weight = tgt_weights[tgt_h,tgt_w]
+
+                    # -- joint weight --
+                    src_ave_h = src_labels2pix_ave[src_label,0]
+                    src_ave_w = src_labels2pix_ave[src_label,1]
+                    tgt_ave_h = tgt_labels2pix_ave[tgt_label,0]
+                    tgt_ave_w = tgt_labels2pix_ave[tgt_label,1]
+                    joint_d = ((src_h - src_ave_h) - (tgt_h - tgt_ave_h) )**2
+                    joint_d += ((src_w - src_ave_w) - (tgt_w - tgt_ave_w))**2
+                    joint_w = np.exp(-joint_d/(20.))
+
+                    # -- compte deltas --
+                    pk_dist = 0
+                    for ci in range(nchnls):
+                        src_pix = src_img[ci,src_h,src_w]/255.
+                        tgt_pix = tgt_img[ci,tgt_h,tgt_w]/255.
+                        pk_dist += (src_pix - tgt_pix)**2/nchnls
+                    weight = joint_w * tgt_weight * src_weight
+                    pk_dist = pk_dist * weight
+
+                    # -- update agg --
+                    dist += pk_dist
+                    Z += weight
+
+            # -- add to distances --
+            norms[src_label,tgt_label] = dist/Z
+
+@jit
 def superpixel_norm_numba(norm_sp,weight_sp,flow,
                           src_img,src_labels,src_pix2windowLabels,
                           src_labels2pix_ave,src_weights,
@@ -242,9 +340,9 @@ def superpixel_norm_numba(norm_sp,weight_sp,flow,
                     # joint_d += (hk - hj)**2 + (wk - wj)**2
                     # joint_d = ((hj - (hk + flow[0,hk,wk]) - src_ave_h-tgt_ave_h) )**2
                     # joint_d += ((wj - (wk + flow[1,hk,wk]) - src_ave_w-tgt_ave_w) )**2
-                    joint_d = ((hj - src_ave_h) - (hk - tgt_ave_h) )**2
-                    joint_d += ((wj - src_ave_w) - (wk - tgt_ave_w))**2
-                    joint_w = np.exp(-joint_d/(5*10.))
+                    joint_d = ((hk - src_ave_h) - (hj - tgt_ave_h) )**2
+                    joint_d += ((wk - src_ave_w) - (wj - tgt_ave_w))**2
+                    joint_w = np.exp(-joint_d/(20.))
 
                     # -- compte deltas --
                     pk_dist = 0
@@ -252,7 +350,7 @@ def superpixel_norm_numba(norm_sp,weight_sp,flow,
                         src_pix = src_img[ci,hk,wk]/255.
                         tgt_pix = tgt_img[ci,hj,wj]/255.
                         pk_dist += (src_pix - tgt_pix)**2/nchnls
-                    weight = 1#joint_w# * tgt_w * src_w
+                    weight = joint_w# * tgt_w * src_w
                     pk_dist = pk_dist * weight
                     Z += weight
 

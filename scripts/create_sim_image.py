@@ -44,6 +44,7 @@ def main():
     burst = n3seg.testing.load_data("motorbike")[:3]
     burst = n3seg.utils.interpolate(burst,size=(256,256),mode='bicubic')
     burst = burst[:,:,64:128,64:128]
+    burst[1] = burst[0]
 
     # -- compute flow --
     flows = n3seg.flows.compute_flows(burst)
