@@ -23,86 +23,50 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     # -- unpack args --
     c,h,w = src.img.shape
     ws = optional(kwargs,'ws',30)
+    flow,zflow = get_flows(src,tgt,flows)
+    flow = zflow
 
-    # -- get flow --
-    if tgt.index - src.index > 0:
-        flow = flows.fflows[src.index].copy()
-        for t in range(src.index,tgt.index):
-            flow += flows.fflows[t]
-    elif tgt.index - src.index < 0:
-        flow = flows.bflows[src.index].copy()
-        for t in range(src.index,tgt.index,-1):
-            flow += flows.bflows[t]
-    else:
-        flow = np.zeros_like(flows.fflows[0])
-    zflow = np.zeros_like(flow)
-    print(flow)
+    # -- relevant superpix shapes  --
+    superpix_shapes(tgt)
+    superpix_shapes(src)
 
-    # -- counts of labels --
-    tgt_nlabels = np.max(tgt.labels).item()+1
-    src_nlabels = np.max(src.labels).item()+1
-    src_cnts = np.bincount(src.labels.ravel())
-    src_cmax = src_cnts.max().item()
-    tgt_cnts = np.bincount(tgt.labels.ravel())
-    tgt_cmax = tgt_cnts.max().item()
+    # -- associate labels with set of pixels --
+    tgt.labels2pix = compute_labels2pix(tgt.labels,cmax=tgt.cmax)
+    tgt.labels2pix_ave = compute_labels2pix_ave(tgt.labels2pix)
+    src.labels2pix = compute_labels2pix(src.labels,cmax=src.cmax)
+    src.labels2pix_ave = compute_labels2pix_ave(src.labels2pix)
 
-    # -- What labels are associated with this pixel? create labels 2 pixels --
-    """
-    e.g. labels2pix[label] = [list of pix]
-    """
-    tgt_labels2pix = -np.ones((tgt_nlabels,tgt_cmax,2),dtype=np.int16)
-    counts = np.zeros((tgt_nlabels),dtype=np.int16)
-    labels2pix_numba(tgt_labels2pix,counts,tgt.labels)
-    tgt_labels2pix_ave = compute_labels2pix_ave(tgt_labels2pix)
+    # -- spatial weights (distance from center) --
+    tgt.weights = compute_spatial_weights(tgt.labels2pix,tgt.labels2pix_ave,tgt.labels)
+    src.weights = compute_spatial_weights(src.labels2pix,src.labels2pix_ave,src.labels)
 
-    src_labels2pix = -np.ones((src_nlabels,src_cmax,2),dtype=np.int16)
-    counts = np.zeros((src_nlabels),dtype=np.int16)
-    labels2pix_numba(src_labels2pix,counts,src.labels)
-    src_labels2pix_ave = compute_labels2pix_ave(src_labels2pix)
-
-    # -- Compute SuperPixel Spatial Weights (distance from center) --
-    tgt_weights = compute_spatial_weights(tgt_labels2pix,tgt_labels2pix_ave,tgt.labels)
-    src_weights = compute_spatial_weights(src_labels2pix,src_labels2pix_ave,src.labels)
-
-    # -- Which labels are neighbors of my pixel? create pixel 2 window-labels --
-    """
-    e.g. pix2windowLabels[hi,wi] = [list of label values]
-    """
+    # -- labels in search window around each pix --
     smax = 10*ws # just set randomly
-    tgt_pix2windowLabels = -np.ones((h,w,smax),dtype=np.int16)
-    counts = np.zeros((h,w),dtype=np.int16)
-    print("flow.shape: ",flow.shape)
-    pix2windowLabels_numba(tgt_pix2windowLabels,counts,tgt.labels,flow,ws)
-
-    src_pix2windowLabels = -np.ones((h,w,smax),dtype=np.int16)
-    counts[...] = 0
-    pix2windowLabels_numba(src_pix2windowLabels,counts,src.labels,zflow,ws)
-
-    # print(pix2windowLabels[0,0])
-    # print(pix2windowLabels[16,16])
+    compute_search_labels(tgt,flow,smax,ws)
+    compute_search_labels(src,zflow,smax,ws)
 
     # -- L2 Norm between super-pixels? --
     norm_sp = float("inf") * np.ones((h,w,smax),dtype=np.float32)
     weight_sp = float("inf") * np.ones((h,w,smax),dtype=np.float32)
     superpixel_norm_numba(norm_sp,weight_sp,flow,
-                          src.img,src.labels,src_pix2windowLabels,#src_labe2pix,
-                          src_labels2pix_ave,src_weights,
-                          tgt.img,tgt_pix2windowLabels,tgt_labels2pix,
-                          tgt_labels2pix_ave,tgt_weights)
+                          src.img,src.labels,src.pix2windowLabels,#src.labe2pix,
+                          src.labels2pix_ave,src.weights,
+                          tgt.img,tgt.pix2windowLabels,tgt.labels2pix,
+                          tgt.labels2pix_ave,tgt.weights)
 
-    norms = np.zeros((src_nlabels,tgt_nlabels),dtype=np.float32)
-    norms_w = np.zeros((src_nlabels,tgt_nlabels),dtype=np.float32)
-    counts = np.zeros((src_nlabels,tgt_nlabels),dtype=np.float32)
+    norms = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
+    norms_w = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
+    counts = np.zeros((src.nlabels,tgt.nlabels),dtype=np.float32)
 
     superpixel_reduce_numba(norms,norms_w,counts,norm_sp,weight_sp,
-                            src_labels2pix,tgt_pix2windowLabels)
+                            src.labels2pix,tgt.pix2windowLabels)
     norms[np.where(counts == 0)] = float("inf")
     norms = norms/norms_w
 
     #
     # -- take topk norms --
     #
-    # norms = np.random.rand(src_nlabels,tgt_nlabels)
+    # norms = np.random.rand(src.nlabels,tgt.nlabels)
 
     # -- compute topk --
     k = 5
@@ -119,6 +83,26 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
 
     return topk
 
+
+def get_flows(src,tgt,flows):
+    # -- get flow --
+    if tgt.index - src.index > 0:
+        flow = flows.fflow[src.index].copy()
+        for t in range(src.index,tgt.index):
+            flow += flows.fflow[t]
+    elif tgt.index - src.index < 0:
+        flow = flows.bflow[src.index].copy()
+        for t in range(src.index,tgt.index,-1):
+            flow += flows.bflow[t]
+    else:
+        flow = np.zeros_like(flows.fflow[0])
+    zflow = np.zeros_like(flow)
+    return flow,zflow
+
+def superpix_shapes(spix):
+    spix.nlabels = np.max(spix.labels).item()+1
+    spix.cnts = np.bincount(spix.labels.ravel())
+    spix.cmax = spix.cnts.max().item()
 
 @jit
 def superpixel_reduce_numba(norm_labels,norm_weights,counts,norm_sp,weight_sp,
@@ -137,6 +121,16 @@ def superpixel_reduce_numba(norm_labels,norm_weights,counts,norm_sp,weight_sp,
                 norm_labels[src_label,tgt_label] += sp
                 norm_weights[src_label,tgt_label] += w
                 counts[src_label,tgt_label] += 1
+
+def compute_search_labels(spix,flow,smax,ws):
+    # -- Which labels are neighbors of my pixel? create pixel 2 window-labels --
+    """
+    e.g. pix2windowLabels[hi,wi] = [list of label values]
+    """
+    c,h,w = spix.img.shape
+    spix.pix2windowLabels = -np.ones((h,w,smax),dtype=np.int16)
+    counts = np.zeros((h,w),dtype=np.int16)
+    pix2windowLabels_numba(spix.pix2windowLabels,counts,spix.labels,flow,ws)
 
 def compute_spatial_weights(labels2pix,labels2pix_ave,labels):
     labels2pix = labels2pix.astype(np.float32)
@@ -157,6 +151,10 @@ def fill_weights(weights,label_aves,labels):
             weights[hi,wi] = np.exp(-dist/20.)
 
 def compute_labels2pix_ave(labels2pix):
+    # -- What labels are associated with this pixel? create labels 2 pixels --
+    """
+    e.g. labels2pix[label] = [list of pix]
+    """
     nlabels,pmax,two = labels2pix.shape
     ave = np.zeros((nlabels,2),dtype=np.float32)
     counts = np.zeros((nlabels),dtype=np.int)
@@ -254,7 +252,7 @@ def superpixel_norm_numba(norm_sp,weight_sp,flow,
                         src_pix = src_img[ci,hk,wk]/255.
                         tgt_pix = tgt_img[ci,hj,wj]/255.
                         pk_dist += (src_pix - tgt_pix)**2/nchnls
-                    weight = joint_w * tgt_w * src_w
+                    weight = 1#joint_w# * tgt_w * src_w
                     pk_dist = pk_dist * weight
                     Z += weight
 

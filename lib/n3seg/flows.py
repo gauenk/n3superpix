@@ -21,8 +21,8 @@ def compute_flows(burst):
     bflows = th.stack(bflows).numpy()
 
     flows = edict()
-    flows.fflows = fflows
-    flows.bflows = bflows
+    flows.fflow = fflows
+    flows.bflow = bflows
 
     return flows
 

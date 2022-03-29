@@ -1,11 +1,37 @@
 
+# -- org --
+from easydict import EasyDict as edict
+
 # -- linalg --
 import numpy as np
 import torch as th
 from einops import rearrange,repeat
 
+# -- vision --
+
+# -- competitor --
+import vpss
+
 # -- this lib --
 import n3seg
+
+def mse(a,b):
+    return th.mean(((a - b)/255.)**2).item()
+
+def viz_patch_warping(burst,flows):
+    warped_ref = burst[0]
+    warped_db = burst[1]
+    vflows = edict({k:v[:2] for k,v in flows.items()})
+    warped_3 = vpss.sim_img.get_sim_from_pair(burst[0],burst[1],flows=vflows,ps=3)
+    warped_7 = vpss.sim_img.get_sim_from_pair(burst[0],burst[1],flows=vflows,ps=7)
+    error_w3 = mse(warped_3.cpu(),warped_ref)
+    error_w7 = mse(warped_7.cpu(),warped_ref)
+    n3seg.utils.save_image(warped_ref,"./output/warped_ref.png")
+    n3seg.utils.save_image(warped_db,"./output/warped_db.png")
+    n3seg.utils.save_image(warped_3,"./output/warped_3.png")
+    n3seg.utils.save_image(warped_7,"./output/warped_7.png")
+    print("Error[ps=3]: ",error_w3)
+    print("Error[ps=7]: ",error_w7)
 
 def main():
 
@@ -15,11 +41,14 @@ def main():
     np.random.seed(seed)
 
     # -- load image burst --
-    burst = n3seg.testing.load_data("motorbike")[:4]
-    burst = burst[:,:,:128,:128]
+    burst = n3seg.testing.load_data("motorbike")[:3]
+    burst = n3seg.utils.interpolate(burst,size=(256,256),mode='bicubic')
+    burst = burst[:,:,64:128,64:128]
 
     # -- compute flow --
     flows = n3seg.flows.compute_flows(burst)
+    if viz:
+        viz_patch_warping(burst,flows)
 
     # -- superpixels --
     slics,labels = n3seg.run_slic(burst)
@@ -53,10 +82,7 @@ def main():
 
     # -- warp frame --
     warped = n3seg.run_superpix_warp(src,tgt,neighs)
-
-    # -- [optional] viz warped frame --
-    if viz:
-        n3seg.utils.save_image(warped,"./output/warped.png")
+    print(warped)
 
     # -- compute sim quality --
     delta = np.mean((warped - burst[0])**2).item()
