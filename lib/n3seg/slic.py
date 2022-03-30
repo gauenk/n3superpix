@@ -8,7 +8,7 @@ from einops import rearrange,repeat
 from fast_slic import Slic
 
 
-def run_slic(burst,ncomps=400,comp=30):
+def run_slic(burst,ncomps=200,comp=30):
     nframes = burst.shape[0]
     slics,labels = [],[]
     for t in range(nframes):

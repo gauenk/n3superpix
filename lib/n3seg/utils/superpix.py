@@ -30,7 +30,6 @@ def superpix_dict(burst,labels,slics,index):
                   'slic':slics[index],
                   'index':index})
 
-
 # ------------------------------------
 #
 #    Indiviaul Superpixels Mangling
@@ -40,10 +39,15 @@ def superpix_dict(burst,labels,slics,index):
 def get_superpix_box_nn(src,tgt,neighs,viz_list=None):
     if viz_list is None:
         viz_list = np.arange(120,140)
+    nlabels = neighs.inds.shape[0]
     boxes_list = []
+    viz_list = [40] + list(viz_list)
+    delta = np.mean(((src.labels - tgt.labels)**2).astype(np.float))
+    print("delta: ",delta)
     for viz_label in viz_list:
 
         # -- get boxes --
+        viz_label = viz_label % nlabels
         label_nn = neighs.inds[viz_label]
         print("label_nn: ",viz_label,label_nn)
         src_box = get_superpix_box(src.img,src.labels,viz_label)
@@ -89,7 +93,8 @@ def update_boxes(boxes,prop_box):
     nboxes = len(boxes)
     for i in range(nboxes):
         th_box_i = th.from_numpy(boxes[i])[None,:].type(th.float)
-        th_box_i = nnf.interpolate(th_box_i,size=(h_max,w_max),mode="bicubic")
+        th_box_i = nnf.interpolate(th_box_i,size=(h_max,w_max),
+                                   mode="bicubic",align_corners=False)
         boxes[i] = th_box_i.cpu().clamp(0,255.).numpy()[0].astype(np.uint8)
     return boxes
 

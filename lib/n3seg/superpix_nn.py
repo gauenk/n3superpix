@@ -76,6 +76,11 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
                                  tgt.img,tgt.pix2windowLabels,tgt.labels2pix,
                                  tgt.labels2pix_ave,tgt.weights)
 
+    print(labelSearchWindow[50])
+    print(norms[50])
+    print("norms[50,40]: ",norms[40,50])
+    print("norms[50,50]: ",norms[50,50])
+
     #
     # -- take topk norms --
     #
@@ -91,8 +96,8 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     order = np.argsort(topk.vals,1)
     topk.vals = np.take_along_axis(topk.vals,order,1)
     topk.inds = np.take_along_axis(topk.inds,order,1)
-    print(topk.vals[[0,10,30,50,80,10]])
-    print(topk.inds[[0,10,30,50,80,10]])
+    print(topk.vals[[0,10,30,40,50,80,10]])
+    print(topk.inds[[0,10,30,40,50,80,10]])
     print("-"*30)
     print(topk.vals[[127,37,149,19,104,179]])
     print(topk.inds[[127,37,149,19,104,179]])
@@ -152,12 +157,22 @@ def create_search_window_numba(searchLabelWindow,src_labels2pix,tgt_pix2windowLa
     h,w,nsearch = tgt_pix2windowLabels.shape
     for src_label in prange(src_nlabels):
         search_index = 0
+        slw_index = 0
         for pix_index in range(npix):
             tgt_h = src_labels2pix[src_label,pix_index,0]
             tgt_w = src_labels2pix[src_label,pix_index,1]
             if tgt_h == -1: break
             tgt_label = tgt_pix2windowLabels[tgt_h,tgt_w,pix_index]
-            searchLabelWindow[src_label,pix_index] = tgt_label
+            do_add = True
+            for pix_j in range(npix):
+                if pix_j >= slw_index: break
+                curr_label = searchLabelWindow[src_label,pix_j]
+                if curr_label == tgt_label:
+                    do_add = False
+                    break
+            if do_add:
+                searchLabelWindow[src_label,slw_index] = tgt_label
+                slw_index += 1
 
 def compute_search_labels(spix,flow,smax,ws):
     # -- Which labels are neighbors of my pixel? create pixel 2 window-labels --
@@ -185,7 +200,7 @@ def fill_weights(weights,label_aves,labels):
             h_ave = label_aves[label,0]
             w_ave = label_aves[label,1]
             dist = (h_ave - hi)**2 + (w_ave - wi)**2
-            weights[hi,wi] = np.exp(-dist/20.)
+            weights[hi,wi] = np.exp(-dist/10.)
 
 def compute_labels2pix_ave(labels2pix):
     # -- What labels are associated with this pixel? create labels 2 pixels --
@@ -276,7 +291,7 @@ def superpixel_norm_labels_numba(norms,labelSearchWindow,
                     tgt_ave_w = tgt_labels2pix_ave[tgt_label,1]
                     joint_d = ((src_h - src_ave_h) - (tgt_h - tgt_ave_h) )**2
                     joint_d += ((src_w - src_ave_w) - (tgt_w - tgt_ave_w))**2
-                    joint_w = np.exp(-joint_d/(2.*1e-2))
+                    joint_w = np.exp(-joint_d/(1e-3)) # how shapely the loss is
 
                     # -- compte deltas --
                     pk_dist = 0
@@ -383,7 +398,9 @@ def pix2windowLabels_numba(pix2windowLabels,counts,labels,flow,ws):
             # -- iterate over offsets --
             h_left,h_right = -1,1
             for hindex in range(2*ws):
-                if hindex % 2 == 0:
+                if hindex == 0:
+                    h_shift = 0
+                elif hindex % 2 == 0:
                     h_shift = h_left
                     h_left -= 1
                 else:
@@ -398,7 +415,9 @@ def pix2windowLabels_numba(pix2windowLabels,counts,labels,flow,ws):
 
                 w_left,w_right = -1,1
                 for windex in range(2*ws):
-                    if windex % 2 == 0:
+                    if windex == 0:
+                        w_shift = 0
+                    elif windex % 2 == 0:
                         w_shift = w_left
                         w_left -= 1
                     else:
