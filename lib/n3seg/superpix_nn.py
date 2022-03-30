@@ -27,8 +27,6 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     flow = zflow
 
     # -- relevant superpix shapes  --
-    delta = np.mean(((src.labels - tgt.labels)**2).astype(np.float))
-    print("delta: ",delta)
     superpix_shapes(tgt)
     superpix_shapes(src)
 
@@ -43,7 +41,7 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     src.weights = compute_spatial_weights(src.labels2pix,src.labels2pix_ave,src.labels)
 
     # -- labels in search window around each pix --
-    smax = 10*ws # just set randomly
+    smax = 5*ws # just set randomly
     compute_search_labels(tgt,flow,smax,ws)
     compute_search_labels(src,zflow,smax,ws)
 
@@ -76,11 +74,6 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
                                  tgt.img,tgt.pix2windowLabels,tgt.labels2pix,
                                  tgt.labels2pix_ave,tgt.weights)
 
-    print(labelSearchWindow[50])
-    print(norms[50])
-    print("norms[50,40]: ",norms[40,50])
-    print("norms[50,50]: ",norms[50,50])
-
     #
     # -- take topk norms --
     #
@@ -96,11 +89,11 @@ def run_superpix_nn(src,tgt,flows,**kwargs):
     order = np.argsort(topk.vals,1)
     topk.vals = np.take_along_axis(topk.vals,order,1)
     topk.inds = np.take_along_axis(topk.inds,order,1)
-    print(topk.vals[[0,10,30,40,50,80,10]])
-    print(topk.inds[[0,10,30,40,50,80,10]])
-    print("-"*30)
-    print(topk.vals[[127,37,149,19,104,179]])
-    print(topk.inds[[127,37,149,19,104,179]])
+    # print(topk.vals[[0,10,30,40,50,80,10]])
+    # print(topk.inds[[0,10,30,40,50,80,10]])
+    # print("-"*30)
+    # print(topk.vals[[127,37,149,19,104,179]])
+    # print(topk.inds[[127,37,149,19,104,179]])
 
 
     return topk
@@ -291,7 +284,7 @@ def superpixel_norm_labels_numba(norms,labelSearchWindow,
                     tgt_ave_w = tgt_labels2pix_ave[tgt_label,1]
                     joint_d = ((src_h - src_ave_h) - (tgt_h - tgt_ave_h) )**2
                     joint_d += ((src_w - src_ave_w) - (tgt_w - tgt_ave_w))**2
-                    joint_w = np.exp(-joint_d/(1e-3)) # how shapely the loss is
+                    joint_w = np.exp(-joint_d/(1e1)) # how shapely the loss is
 
                     # -- compte deltas --
                     pk_dist = 0
@@ -397,7 +390,7 @@ def pix2windowLabels_numba(pix2windowLabels,counts,labels,flow,ws):
 
             # -- iterate over offsets --
             h_left,h_right = -1,1
-            for hindex in range(2*ws):
+            for hindex in range(2*ws+1):
                 if hindex == 0:
                     h_shift = 0
                 elif hindex % 2 == 0:
@@ -414,7 +407,7 @@ def pix2windowLabels_numba(pix2windowLabels,counts,labels,flow,ws):
                 h0 = h0 if h0 < h else 2*h - h0 - 1
 
                 w_left,w_right = -1,1
-                for windex in range(2*ws):
+                for windex in range(2*ws+1):
                     if windex == 0:
                         w_shift = 0
                     elif windex % 2 == 0:

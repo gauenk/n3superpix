@@ -43,13 +43,12 @@ def get_superpix_box_nn(src,tgt,neighs,viz_list=None):
     boxes_list = []
     viz_list = [40] + list(viz_list)
     delta = np.mean(((src.labels - tgt.labels)**2).astype(np.float))
-    print("delta: ",delta)
     for viz_label in viz_list:
 
         # -- get boxes --
         viz_label = viz_label % nlabels
         label_nn = neighs.inds[viz_label]
-        print("label_nn: ",viz_label,label_nn)
+        # print("label_nn: ",viz_label,label_nn)
         src_box = get_superpix_box(src.img,src.labels,viz_label)
         boxes = get_superpix_list(tgt.img,tgt.labels,label_nn)
         boxes = update_boxes(boxes,src_box)

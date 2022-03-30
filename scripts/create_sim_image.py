@@ -16,7 +16,11 @@ import vpss
 import n3seg
 
 def mse(a,b):
-    return th.mean(((a - b)/255.)**2).item()
+    if th.is_tensor(a):
+        a = a.numpy()
+    if th.is_tensor(b):
+        b = b.numpy()
+    return np.mean(((a - b)/255.)**2).item()
 
 def viz_patch_warping(burst,flows):
     warped_ref = burst[0]
@@ -42,9 +46,8 @@ def main():
 
     # -- load image burst --
     burst = n3seg.testing.load_data("motorbike")[:3]
-    burst = n3seg.utils.interpolate(burst,size=(256,256),mode='bicubic')
+    # burst = n3seg.utils.interpolate(burst,size=(256,256),mode='bicubic')
     burst = burst[:,:,64:128,64:128]
-    burst[1] = burst[0]
 
     # -- compute flow --
     flows = n3seg.flows.compute_flows(burst)
@@ -84,10 +87,12 @@ def main():
     # -- warp frame --
     warped = n3seg.run_superpix_warp(src,tgt,neighs)
     print(warped)
+    if viz:
+        n3seg.utils.save_image(warped,"./output/warped_seg.png")
 
     # -- compute sim quality --
-    delta = np.mean((warped - burst[0])**2).item()
-    print("[Sim Image (SSD)]: ",delta)
+    error = mse(warped,burst[0])
+    print("[Sim Image (SSD)]: ",error)
 
 
 if __name__ == "__main__":
